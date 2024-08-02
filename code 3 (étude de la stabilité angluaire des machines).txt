@@ -1,0 +1,127 @@
+#ce script permet d'étudier la stabilité angulaire des groupes(machines) des bus
+
+#initialisation de l'environnement PSSE tq 10000 représente le nombre max d'élément à gérer
+psspy.psseinit(10000)
+
+#on va étudier pour chaque bus une machine 
+buses_150_225_400kV=[81022,81023,81311,81272,81279,81280,81500,81511,81512,81701,81702,81719,81747,81797]
+machines=[81212,81199,81213,81915,81746,81836,81605,81602,81603,81722,81720,81921,81829,81923]
+
+noms_machines=["JORF -G1    22.000","C.T.M-G1    15.000","JORF -G2    22.000","STEP ABD1   13.800","TAH         0.6900","PE AKHFENIR 0.6900",
+               "TAHADG1     21.000","STEPIG2     13.800","STEPIIG1    10.300","AB.MATG1    14.500","C.T.SAFI G1 21.000","JORF V      18.000",
+               "CS_OUAR_N1  15.000","JERADA G1   20.000"]
+
+
+#on va tester avec les temps d'élimination du défaut suivants:
+temps=[2.2,2.3,2.4]
+
+
+#liste pour stocker les fichiers (.out)
+fichiers=[]
+
+#les simulations pour les différents bus.
+
+for bus in buses_150_225_400kV:
+
+    for t in temps:
+        psspy.psseinit(10000)
+
+        # Recharge des bases de données statique et dynamique avant chaque simulation.
+
+        #ouverture de la  base de donné statique
+        psspy.case(r"""X:\2024_07_04__Peak_90percent_6300MW.sav""")
+
+        #étude de load flow ( en utilisant la méthode de Newthon Raphson)
+        psspy.fdns([0, 0, 0, 0, 0, 0, 99, 0])
+
+        #conversion des générateurs pour l'étude dynamique
+        psspy.cong(0)
+
+        #conversion des charges
+        psspy.conl(0, 1, 1, [0, 0], [100.0, 0.0, 0.0, 100.0])
+        psspy.conl(0, 1, 2, [0, 0], [100.0, 0.0, 0.0, 100.0])
+        psspy.conl(0, 1, 3, [0, 0], [100.0, 0.0, 0.0, 100.0])
+
+        #réorganisation du réseau pour optimiser le calcul
+        psspy.ordr(0)
+
+        #factorisation de la matrice d'admittance
+        psspy.fact()
+
+        #commande permettant d’effectuer des simulations pour des études de changements d’états.
+        psspy.tysl(0)
+
+        #ouverture de la base de données dynamique
+        psspy.dyre_new([1, 1, 1, 1], r"""X:\BD-dyn 04-07-2024.dyr""", "", "", "")
+
+
+        # définition des canaux de sortie.
+
+        psspy.voltage_and_angle_channel([1, 747, 245, bus], ["", ""])
+
+        # récupération de l'indice du bus dans la liste des bus
+        indice = buses_150_225_400kV.index(bus)
+        i=3
+        for h in range(1,8):
+            psspy.machine_array_channel([i,h, machines[indice]], r"""1""", "")
+            i=i+1
+
+        #on va enregistrer les résultats de la simulation dans le fichier suivant
+        fichier = "C:\Users\\test\Desktop\\les fichiers out\\fichier_" + str(bus) + "_" + str(t) + ".out"
+
+        fichiers.append(fichier)
+
+        #définition des parametres de solution
+        psspy.dynamics_solution_param_2([250, _i, _i, _i, _i, _i, _i, _i], [_f, _f, 0.001, _f, _f, _f, _f, _f])
+        psspy.change_channel_out_file(fichier)
+
+        #initialisation de la simulation dans le fichier correspondant et vérfication des conditions initiales
+        psspy.strt_2([0, 0], fichier)
+
+        #simulation pour 2 secondes
+        psspy.run(0, 2.0, 120, 1, 0)
+
+        #determination de la tension du bus
+        ierr, tension_Kv = psspy.busdat(bus, 'BASE')
+
+        #application d'un défaut triphasé au niveau du bus.
+        psspy.dist_bus_fault(bus, 1, tension_Kv, [0.0, -0.2E+10])
+
+        #simulation avec défaut jusqu'à t
+        psspy.run(0, t, 120, 1, 0)
+
+        # élimination du défaut
+        psspy.dist_clear_fault(1)
+
+        #simulation aprés élimination du défaut jusq'à 6 secondes.
+        psspy.run(0, 6, 120, 1, 0)
+
+
+#insertion de plotiing book
+pssplot.newplotbook()
+
+#insertion des pages
+for i in range(len(buses_150_225_400kV)-1):
+    pssplot.insertpage()
+
+#ouverture des fichiers
+for f in fichiers:
+    pssplot.openchandatafile(f)
+
+#selection des canaux à visualiser
+canaux=[]
+for c in range(len(machines)):
+    canal="3 - ANGL "+str(machines[c])+"["+noms_machines[c]+"]1"
+    for k in range(3):
+        canaux.append(canal)
+
+#visualisation des résultats
+j=0
+i=1
+for k in range(len(fichiers)):
+    pssplot.setselectedpage(j)
+    pssplot.dragdropplotdata(fichiers[k],canaux[k])
+    if(i%3==0):
+        j=j+1
+    i = i + 1
+
